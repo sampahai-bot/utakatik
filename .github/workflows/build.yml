@@ -1,0 +1,124 @@
+name: Build PDF Office Converter
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+permissions:
+  contents: write
+env:
+  FLUTTER_VERSION: '3.24.5'
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: subosito/flutter-action@v2
+        with: { flutter-version: '${{ env.FLUTTER_VERSION }}', channel: stable, cache: true }
+      - name: Buat folder platform
+        working-directory: flutter
+        run: |
+          flutter create --platforms=android --org id.pdfofficeconverter --project-name pdf_office_converter .
+          rm -rf test
+      - name: Atur Android (minSdk, nama)
+        working-directory: flutter
+        run: |
+          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 24/; s/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle
+          sed -i 's/android:label="[^"]*"/android:label="PDF Office Converter"/' android/app/src/main/AndroidManifest.xml
+      - run: flutter pub get
+        working-directory: flutter
+      - name: Ikon aplikasi
+        continue-on-error: true
+        working-directory: flutter
+        run: dart run flutter_launcher_icons
+      - run: flutter build apk --release --target-platform android-arm64,android-arm
+        working-directory: flutter
+      - run: cp flutter/build/app/outputs/flutter-apk/app-release.apk PDF-Office-Converter.apk
+      - uses: actions/upload-artifact@v4
+        with: { name: android-apk, path: PDF-Office-Converter.apk }
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - uses: subosito/flutter-action@v2
+        with: { flutter-version: '${{ env.FLUTTER_VERSION }}', channel: stable, cache: true }
+      - name: Bangun engine Python
+        working-directory: windows_engine
+        shell: pwsh
+        run: |
+          python -m pip install -r requirements.txt pyinstaller
+          pyinstaller --noconfirm --onedir --name pdf_engine --console `
+            --collect-all pypdfium2 --collect-all pikepdf --collect-all pdfplumber `
+            --collect-all pdfminer --collect-all docx converter.py
+          dist\pdf_engine\pdf_engine.exe --help
+      - name: Siapkan Tesseract (OCR) + bahasa Indonesia
+        shell: pwsh
+        run: |
+          choco install tesseract --no-progress -y
+          $src = "C:\Program Files\Tesseract-OCR"
+          $dst = "windows_engine\dist\pdf_engine\tesseract"
+          Copy-Item $src $dst -Recurse
+          Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata_fast/raw/main/ind.traineddata" -OutFile "$dst\tessdata\ind.traineddata"
+          if (-not (Test-Path "$dst\tessdata\eng.traineddata")) {
+            Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata" -OutFile "$dst\tessdata\eng.traineddata"
+          }
+      - name: Uji engine (PDF contoh)
+        shell: pwsh
+        run: |
+          python -c "import pypdfium2 as p; d=p.PdfDocument.new(); d.new_page(595,842); d.save('contoh.pdf')"
+          windows_engine\dist\pdf_engine\pdf_engine.exe compress contoh.pdf contoh_k.pdf
+          windows_engine\dist\pdf_engine\pdf_engine.exe pdf2docx contoh.pdf contoh.docx --layout preserve
+          windows_engine\dist\pdf_engine\pdf_engine.exe pdf2images contoh.pdf contoh_img
+          windows_engine\dist\pdf_engine\tesseract\tesseract.exe --list-langs
+      - name: Buat folder platform
+        working-directory: flutter
+        run: |
+          flutter create --platforms=windows --org id.pdfofficeconverter --project-name pdf_office_converter .
+          Remove-Item test -Recurse -Force
+      - run: flutter pub get
+        working-directory: flutter
+      - name: Ikon aplikasi
+        continue-on-error: true
+        working-directory: flutter
+        run: dart run flutter_launcher_icons
+      - run: flutter build windows --release
+        working-directory: flutter
+      - name: Gabungkan engine + runtime VC++
+        shell: pwsh
+        run: |
+          $rel = "flutter\build\windows\x64\runner\Release"
+          Copy-Item windows_engine\dist\pdf_engine "$rel\engine" -Recurse
+          foreach ($d in 'msvcp140.dll','vcruntime140.dll','vcruntime140_1.dll') { Copy-Item "C:\Windows\System32\$d" $rel -ErrorAction SilentlyContinue }
+      - name: Buat installer
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\installer.iss
+          Compress-Archive -Path "flutter\build\windows\x64\runner\Release\*" -DestinationPath PDF-Office-Converter-Windows-Portable.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            installer/output/PDF-Office-Converter-Setup.exe
+            PDF-Office-Converter-Windows-Portable.zip
+
+  release:
+    needs: [android, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist }
+      - name: Rilis (unduh langsung dari halaman Releases)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v1.0.${{ github.run_number }}" --repo "${{ github.repository }}" \
+            --title "PDF Office Converter v1.0.${{ github.run_number }}" \
+            --notes "Android: PDF-Office-Converter.apk. Windows: PDF-Office-Converter-Setup.exe (installer) atau Portable.zip." \
+            dist/android-apk/PDF-Office-Converter.apk \
+            dist/windows/installer/output/PDF-Office-Converter-Setup.exe \
+            dist/windows/PDF-Office-Converter-Windows-Portable.zip
