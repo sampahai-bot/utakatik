@@ -24,10 +24,11 @@ jobs:
       - name: Atur Android (minSdk, nama)
         working-directory: flutter
         run: |
-             sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 24/; s/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle
-             sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/; s/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 35/' android/app/build.gradle
-             sed -i -E 's/(signingConfig[ =]+signingConfigs\.debug)/\1\n            minifyEnabled false\n            shrinkResources false/' android/app/build.gradle
-             sed -i 's/android:label="[^"]*"/android:label="PDF Office Converter"/' android/app/src/main/AndroidManifest.xml      - run: flutter pub get
+          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 24/; s/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/' android/app/build.gradle
+          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/; s/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 35/' android/app/build.gradle
+          sed -i -E 's/(signingConfig[ =]+signingConfigs\.debug)/\1\n            minifyEnabled false\n            shrinkResources false/' android/app/build.gradle
+          sed -i 's/android:label="[^"]*"/android:label="PDF Office Converter"/' android/app/src/main/AndroidManifest.xml
+      - run: flutter pub get
         working-directory: flutter
       - name: Ikon aplikasi
         continue-on-error: true
